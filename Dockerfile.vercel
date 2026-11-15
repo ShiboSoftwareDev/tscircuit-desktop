@@ -8,7 +8,7 @@ RUN node scripts/setup.ts --no-install \
     && pnpm_package=$(node -p "require('./.t3code/package.json').packageManager") \
     && npm install --prefix .cache/preview-tools --no-package-lock \
       "node@$node_version" "${pnpm_package%%+*}" httpxy@0.5.6 @vercel/sandbox@4.0.0 \
-      @openai/codex@0.169.0 tscircuit@0.0.3191 \
+      @openai/codex@0.169.0 bun@1.4.4 tscircuit@0.0.3191 @tscircuit/circuit-json-util@0.0.131 \
     && export PATH="/app/.cache/preview-tools/node_modules/.bin:$PATH" \
     && pnpm --dir .t3code install --frozen-lockfile --filter 't3...' --filter '@t3tools/web...' \
     && pnpm --dir .t3code --filter '@t3tools/web' run build \
@@ -28,4 +28,5 @@ COPY --from=build --chown=node:node /app/.cache/preview-tools/node_modules /app/
 ENV PATH="/app/.cache/preview-tools/node_modules/.bin:$PATH"
 ENV TMPDIR=/tmp
 USER node
+RUN codex --version && tsci --help > /dev/null && ngspice --version > /dev/null
 CMD ["node", "scripts/serve-review-preview.ts"]
