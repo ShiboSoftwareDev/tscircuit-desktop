@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process"
 import { createHash, randomBytes } from "node:crypto"
-import { copyFile, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { copyFile, cp, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises"
+import { existsSync } from "node:fs"
 import { once } from "node:events"
 import { tmpdir } from "node:os"
 import { delimiter, dirname, join, resolve } from "node:path"
@@ -14,6 +15,7 @@ const { values } = parseArgs({
     screenshots: { type: "string" },
     hosted: { type: "boolean" },
     "seed-hosted": { type: "boolean" },
+    sandbox: { type: "boolean" },
   },
 })
 const screenshots = values.screenshots && resolve(values.screenshots)
@@ -23,7 +25,8 @@ const portOffset = 100
 const port = 5733 + portOffset
 const backendPort = 13773 + portOffset
 const localOrigin = `http://localhost:${port}`
-const hosted = values.hosted ? await import("./lib/hosted-review.ts") : undefined
+const sandbox = values.sandbox
+const hosted = values.hosted || sandbox ? await import("./lib/hosted-review.ts") : undefined
 const hostedOrigins = hosted?.getHostedOrigins()
 const origin = hostedOrigins?.[0] ?? localOrigin
 const reviewToken = hosted || seedHosted ? randomBytes(32).toString("hex") : undefined
@@ -36,7 +39,7 @@ const replayModel = { instanceId: "devReplay", model: "showcase" }
 const previewDirectory = hosted || seedHosted
   ? join(tmpdir(), "tscircuit-hosted-review")
   : await mkdtemp(join(tmpdir(), "tscircuit-review-"))
-if (hosted || seedHosted) await mkdir(previewDirectory)
+if (hosted || seedHosted) await mkdir(previewDirectory, { recursive: sandbox === true })
 const appHome = join(previewDirectory, "app-home")
 const stateDirectory = join(appHome, "userdata")
 const database = join(stateDirectory, "statev2.sqlite")
@@ -60,7 +63,10 @@ if (reviewToken) {
 const exec = promisify(execFile)
 const ready = Promise.withResolvers<void>()
 const gateway = hosted && reviewToken
-  ? hosted.serveHostedReview({ target: `http://127.0.0.1:${backendPort}`, ready: ready.promise, reviewToken })
+  ? hosted.serveHostedReview({
+      target: `http://127.0.0.1:${backendPort}`, ready: ready.promise, reviewToken,
+      sandbox: sandbox === true,
+    })
   : undefined
 
 function cli(...args: string[]) {
@@ -88,32 +94,37 @@ async function seedThread() {
 }
 
 try {
-  await cp(join(import.meta.dirname, "fixtures", "review-preview"), project, { recursive: true })
-  await mkdir(stateDirectory, { recursive: true })
-  if (hosted) {
-    await copyFile(snapshot, database)
-    // The browser compares the environment returned over HTTP with its WebSocket.
-    const environmentId = createHash("sha256").update(process.env.VERCEL_URL ?? origin).digest("hex")
-    await writeFile(join(stateDirectory, "environment-id"), `preview-${environmentId}\n`)
-  }
-  // Match the upstream scenario launcher: even generated titles cannot reach a paid provider.
-  const providers = ["codex", "claudeAgent", "cursor", "grok", "muse", "pi", "opencode", "antigravity"]
-  await writeFile(
-    join(stateDirectory, "settings.json"),
-    JSON.stringify({
-      defaultModelSelection: replayModel,
-      providerInstances: Object.fromEntries(
-        providers.map((driver) => [
-          driver,
-          {
+  if (!sandbox || !existsSync(database)) {
+    await cp(join(import.meta.dirname, "fixtures", "review-preview"), project, { recursive: true })
+    await mkdir(stateDirectory, { recursive: true })
+    // Replay stays available before a reviewer signs in to a live provider.
+    const providers = ["codex", "claudeAgent", "cursor", "grok", "muse", "pi", "opencode", "antigravity"]
+    await writeFile(
+      join(stateDirectory, "settings.json"),
+      JSON.stringify({
+        defaultModelSelection: replayModel,
+        providerInstances: Object.fromEntries(
+          providers.map((driver) => [
             driver,
-            enabled: false,
-            ...(driver === "codex" ? { config: { binaryPath: "/usr/bin/false" } } : {}),
-          },
-        ]),
-      ),
-    }),
-  )
+            {
+              driver,
+              enabled: sandbox === true && driver === "codex",
+              ...(!sandbox && driver === "codex" ? { config: { binaryPath: "/usr/bin/false" } } : {}),
+            },
+          ]),
+        ),
+      }),
+    )
+    if (hosted) {
+      if (!sandbox) {
+        // The browser compares the environment returned over HTTP with its WebSocket.
+        const environmentId = createHash("sha256").update(process.env.VERCEL_URL ?? origin).digest("hex")
+        await writeFile(join(stateDirectory, "environment-id"), `preview-${environmentId}\n`)
+      }
+      await copyFile(snapshot, `${database}.seed`)
+      await rename(`${database}.seed`, database)
+    }
+  }
   if (!hosted) await cli("project", "add", project, "--title", projectTitle)
 
   const serverArgs = hosted || seedHosted
@@ -169,5 +180,5 @@ try {
 } finally {
   gateway?.close()
   gateway?.closeAllConnections()
-  await rm(previewDirectory, { recursive: true, force: true })
+  if (!sandbox) await rm(previewDirectory, { recursive: true, force: true })
 }

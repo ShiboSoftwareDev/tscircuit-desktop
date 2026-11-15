@@ -63,9 +63,9 @@ Download and run the Windows x64 `.exe` installer from [Releases](https://github
 
 Open the **Check** workflow from the PR's checks and download **ui-preview** from the run summary. It contains full app screenshots from a sample project and the Add chip flow.
 
-Open **Preview** on the preview PR to try the app in a browser. The preview starts with a sample circuit and the Replay provider. Its workspace resets when the preview instance restarts.
+Open **Preview** on the preview PR to try the app in a browser. Each browser gets a private Vercel Sandbox for the selected revision, with a sample circuit, Replay, Codex, and tscircuit simulation tools. Use **Settings → Providers → Codex** to sign in to a live model. Choose Replay to review the interface without a model account.
 
-Use a dedicated Vercel project with deployment protection. Set its Ignored Build Step to `test "$VERCEL_GIT_COMMIT_REF" != "ci/pr-review-previews"` so branches without `vercel.json` are also skipped.
+Use a dedicated Vercel project with deployment protection and Vercel OIDC enabled. Set its Ignored Build Step to `test "$VERCEL_GIT_COMMIT_REF" != "ci/pr-review-previews"` so branches without `vercel.json` are also skipped.
 
 For a native Apple Silicon check, download the **tscircuit-desktop-mac-arm64-dmg** artifact from the PR's **Release** workflow. Fork PRs without signing credentials offer the ZIP artifact.
 

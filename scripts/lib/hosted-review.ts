@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHash, timingSafeEqual } from "node:crypto"
 import { createReadStream } from "node:fs"
 import { createServer } from "node:http"
 import type { IncomingMessage } from "node:http"
@@ -9,6 +9,9 @@ import { checkoutDir } from "./paths.ts"
 
 const viewerFramePath = "/tscircuit-viewer/frame.html"
 const viewerFrame = join(checkoutDir, "apps", "web", "dist", viewerFramePath)
+export const sandboxPort = 8080
+export const sandboxHealthPath = "/_review-ready"
+export const sandboxAccessHeader = "x-tscircuit-review-backend"
 
 export function getHostedOrigins() {
   const { PREVIEW_ORIGIN, VERCEL_BRANCH_URL, VERCEL_URL, VERCEL_ENV } = process.env
@@ -25,22 +28,42 @@ export function serveHostedReview({
   target,
   ready,
   reviewToken,
+  sandbox,
 }: {
   target: string
   ready: Promise<void>
   reviewToken: string
+  sandbox: boolean
 }) {
+  const accessKey = process.env.REVIEW_SANDBOX_KEY
+  if (sandbox && !accessKey?.match(/^[0-9a-f]{64}$/)) {
+    throw new Error("A private gateway key is required for the sandbox.")
+  }
+  const privateKey = sandbox && accessKey ? Buffer.from(accessKey, "hex") : undefined
+  const isAuthorized = (request: IncomingMessage) => {
+    if (!privateKey) return true
+    const supplied = request.headers[sandboxAccessHeader]
+    if (typeof supplied !== "string" || !/^[0-9a-f]{64}$/.test(supplied)) return false
+    delete request.headers[sandboxAccessHeader]
+    return timingSafeEqual(privateKey, Buffer.from(supplied, "hex"))
+  }
   const proxy = createProxyServer({ target })
-  // Vercel Deployment Protection authenticates the reviewer before the request
-  // arrives here. Authenticate with the local app so requests can land on any
-  // preview instance without sharing its credentials with the browser.
+  // Authenticate with the app without sharing its credentials with the browser.
   const sessionId = createHash("sha256").update(reviewToken).digest("hex")
   const sessionCookie = `t3_dev_session_${sessionId}=${reviewToken}`
   const authenticate = (request: IncomingMessage) => {
     request.headers.cookie = [sessionCookie, request.headers.cookie].filter(Boolean).join("; ")
   }
   const gateway = createServer((request, response) => {
+    if (!isAuthorized(request)) {
+      response.writeHead(401, { "Cache-Control": "no-store" }).end()
+      return
+    }
     void ready.then(async () => {
+      if (request.method === "GET" && request.url === sandboxHealthPath) {
+        response.writeHead(204).end()
+        return
+      }
       if (request.method === "GET" && request.url?.split("?")[0] === viewerFramePath) {
         const compressed = request.headers["accept-encoding"]?.split(",").some((value) => value.trim() === "gzip")
         response.writeHead(200, {
@@ -60,11 +83,15 @@ export function serveHostedReview({
     })
   })
   gateway.on("upgrade", (request, socket, head) => {
+    if (!isAuthorized(request)) {
+      socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n")
+      return
+    }
     void ready.then(() => {
       authenticate(request)
-      return proxy.ws(request, socket, head)
+      return proxy.ws(request, socket, undefined, head)
     }).catch(() => socket.destroy())
   })
-  gateway.listen(Number(process.env.PORT ?? 80), "0.0.0.0")
+  gateway.listen(Number(process.env.PORT ?? (sandbox ? sandboxPort : 80)), "0.0.0.0")
   return gateway
 }
