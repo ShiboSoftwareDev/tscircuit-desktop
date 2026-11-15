@@ -20,6 +20,23 @@ const toolsDirectory = "/app/.cache/preview-tools/node_modules/.bin"
 const workspaces = new Map<string, Promise<string>>()
 const proxy = createProxyServer()
 
+function sandboxCredentials(request: IncomingMessage) {
+  const token = request.headers["x-vercel-oidc-token"] ?? process.env.VERCEL_OIDC_TOKEN
+  if (typeof token !== "string") throw new Error("The request has no Vercel OIDC token.")
+  const encodedClaims = token.split(".")[1]
+  if (!encodedClaims) throw new Error("The Vercel OIDC token has no claims.")
+  const { owner_id: teamId, project_id: projectId } = JSON.parse(
+    Buffer.from(encodedClaims, "base64url").toString("utf8"),
+  )
+  if (typeof teamId !== "string" || typeof projectId !== "string") {
+    throw new Error("The Vercel OIDC token does not identify a project.")
+  }
+  if (process.env.VERCEL_PROJECT_ID && process.env.VERCEL_PROJECT_ID !== projectId) {
+    throw new Error("The Vercel OIDC token belongs to a different project.")
+  }
+  return { token, teamId, projectId }
+}
+
 function identifyReviewer(request: IncomingMessage) {
   return request.headers.cookie?.split(/;\s*/)
     .find((cookie) => cookie.startsWith(`${cookieName}=`))
@@ -40,8 +57,14 @@ async function isReady(target: string, key: string) {
   }
 }
 
-async function startWorkspace(name: string, origin: string, key: string) {
+async function startWorkspace(
+  name: string,
+  origin: string,
+  key: string,
+  credentials: ReturnType<typeof sandboxCredentials>,
+) {
   const sandbox = await Sandbox.getOrCreate({
+    ...credentials,
     name,
     image,
     ports: [sandboxPort],
@@ -52,7 +75,7 @@ async function startWorkspace(name: string, origin: string, key: string) {
     keepLastSnapshots: { count: 1 },
   }).catch((error) => {
     if (!(error instanceof APIError) || error.response.status !== 409) throw error
-    return Sandbox.get({ name, resume: true })
+    return Sandbox.get({ ...credentials, name, resume: true })
   })
   const target = sandbox.domain(sandboxPort)
   if (await isReady(target, key)) return target
@@ -82,12 +105,12 @@ async function startWorkspace(name: string, origin: string, key: string) {
   throw new Error("The sandbox app did not start.")
 }
 
-function prepareRequest(request: IncomingMessage, origin: string, reviewer: string) {
+async function prepareRequest(request: IncomingMessage, origin: string, reviewer: string) {
   const name = `review-${createHash("sha256").update(revision).update(reviewer).digest("hex").slice(0, 32)}`
   const key = createHmac("sha256", reviewer).update(revision).digest("hex")
   let workspace = workspaces.get(name)
   if (!workspace) {
-    workspace = startWorkspace(name, origin, key)
+    workspace = startWorkspace(name, origin, key, sandboxCredentials(request))
     workspaces.set(name, workspace)
     const forget = () => workspaces.delete(name)
     void workspace.then(() => setTimeout(forget, 15_000).unref(), forget)
@@ -102,7 +125,7 @@ function prepareRequest(request: IncomingMessage, origin: string, reviewer: stri
   request.headers[sandboxAccessHeader] = key
   request.headers["x-forwarded-host"] = new URL(origin).host
   request.headers["x-forwarded-proto"] = "https"
-  return workspace.then((target) => ({ target, changeOrigin: true }))
+  return { target: await workspace, changeOrigin: true }
 }
 
 const gateway = createServer((request, response) => {
@@ -125,7 +148,11 @@ const gateway = createServer((request, response) => {
 
   void prepareRequest(request, origin, reviewer).then((options) => proxy.web(request, response, options))
     .catch((error: unknown) => {
-      const reason = error instanceof APIError ? `Sandbox API HTTP ${error.response.status}` : "workspace unavailable"
+      const reason = error instanceof APIError
+        ? `Sandbox API HTTP ${error.response.status}`
+        : error instanceof Error && error.message === "The request has no Vercel OIDC token."
+          ? error.message
+          : "workspace unavailable"
       console.error(`Review preview: ${reason}`)
       if (!response.headersSent) response.writeHead(503, { "Cache-Control": "no-store", "Retry-After": "5" })
       response.end("The review workspace is unavailable. Reload to reconnect.")
