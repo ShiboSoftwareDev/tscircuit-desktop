@@ -1,0 +1,28 @@
+{
+  "name": "tscircuit desktop preview",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "features": {
+    "ghcr.io/devcontainers/features/node:2": {
+      "version": "24"
+    }
+  },
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "8gb"
+  },
+  "updateContentCommand": "bash .devcontainer/setup.sh",
+  "forwardPorts": [5833],
+  "portsAttributes": {
+    "5833": {
+      "label": "tscircuit desktop preview",
+      "onAutoForward": "silent"
+    }
+  },
+  "otherPortsAttributes": {
+    "onAutoForward": "ignore"
+  },
+  "remoteEnv": {
+    "PATH": "${containerWorkspaceFolder}/.cache/preview-tools/node_modules/.bin:${containerEnv:PATH}"
+  },
+  "remoteUser": "vscode"
+}

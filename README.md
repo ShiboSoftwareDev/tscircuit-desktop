@@ -59,6 +59,14 @@ The builds are signed with tscircuit's Apple Developer ID and notarized by Apple
 
 Download and run the Windows x64 `.exe` installer from [Releases](https://github.com/tscircuit/tscircuit-desktop/releases). The installer, app, and uninstaller are signed by tscircuit Inc.
 
+## Review a pull request
+
+Open the **Check** workflow from the PR's checks and download **ui-preview** from the run summary. It contains full app screenshots from a sample project and the Add chip flow.
+
+For an interactive preview, open the PR in [GitHub Codespaces](https://docs.github.com/en/codespaces/developing-in-a-codespace/using-github-codespaces-for-pull-requests), run `npm run preview` in its terminal, and open the pairing URL it prints. The preview starts with a fresh sample project and **Replay (dev)**, which plays recorded responses without provider credentials. Press Ctrl+C to stop it.
+
+For a native Apple Silicon check, download the **tscircuit-desktop-mac-arm64-dmg** artifact from the PR's **Release** workflow. Fork PRs without signing credentials offer the ZIP artifact.
+
 ## Change the app
 
 ```sh
