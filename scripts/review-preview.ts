@@ -23,13 +23,13 @@ const projectTitle = "Voltage divider"
 const threadTitle = "Circuit review"
 const replayModel = { instanceId: "devReplay", model: "showcase" }
 
-const home = await mkdtemp(join(tmpdir(), "tscircuit-review-"))
-const data = join(home, "data")
-const project = join(home, projectTitle)
+const previewDirectory = await mkdtemp(join(tmpdir(), "tscircuit-review-"))
+const appHome = join(previewDirectory, "app-home")
+const project = join(previewDirectory, projectTitle)
 const env: NodeJS.ProcessEnv = {
   ...process.env,
-  HOME: home,
-  USERPROFILE: home,
+  HOME: previewDirectory,
+  USERPROFILE: previewDirectory,
   PATH: [join(checkoutDir, "node_modules", ".bin"), process.env.PATH].join(delimiter),
   TSCIRCUIT_DESKTOP_PORT_OFFSET: String(portOffset),
   TSCIRCUIT_DESKTOP_DEV_ALLOWED_HOSTS: origin.hostname,
@@ -41,7 +41,7 @@ delete env.TSCIRCUIT_DESKTOP_DEV_AUTH_TOKEN
 const exec = promisify(execFile)
 
 function cli(...args: string[]) {
-  return exec(process.execPath, ["apps/server/src/bin.ts", ...args, "--base-dir", data], {
+  return exec(process.execPath, ["apps/server/src/bin.ts", ...args, "--base-dir", appHome], {
     cwd: checkoutDir,
     env,
     timeout: 90_000,
@@ -50,11 +50,11 @@ function cli(...args: string[]) {
 
 try {
   await cp(join(import.meta.dirname, "fixtures", "review-preview"), project, { recursive: true })
-  await mkdir(join(data, "userdata"), { recursive: true })
+  await mkdir(join(appHome, "userdata"), { recursive: true })
   // Match the upstream scenario launcher: even generated titles cannot reach a paid provider.
   const providers = ["codex", "claudeAgent", "cursor", "grok", "muse", "pi", "opencode", "antigravity"]
   await writeFile(
-    join(data, "userdata", "settings.json"),
+    join(appHome, "userdata", "settings.json"),
     JSON.stringify({
       defaultModelSelection: replayModel,
       providerInstances: Object.fromEntries(
@@ -74,7 +74,7 @@ try {
   const server = spawn(
     process.execPath,
     [
-      "scripts/dev-runner.ts", "dev", "--home-dir", data, "--dev-url", origin.origin,
+      "scripts/dev-runner.ts", "dev", "--home-dir", appHome, "--dev-url", origin.origin,
       "--port", String(backendPort),
       "--no-seed", "--no-auto-bootstrap-project-from-cwd",
     ],
@@ -118,5 +118,5 @@ try {
     process.off("SIGTERM", stop)
   }
 } finally {
-  await rm(home, { recursive: true, force: true })
+  await rm(previewDirectory, { recursive: true, force: true })
 }
