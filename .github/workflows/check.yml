@@ -60,23 +60,20 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Link to the PR preview
+      - name: Link to the UI screenshots
         if: github.event_name == 'pull_request'
         continue-on-error: true
         env:
           SCREENSHOTS: ${{ steps.upload-preview.outputs.artifact-url }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           {
-            echo "### UI preview"
+            echo "### UI screenshots"
             echo
             if [ -n "$SCREENSHOTS" ]; then
               echo "[Download screenshots]($SCREENSHOTS) of the sample project and Add chip flow."
             else
               echo "Screenshots are unavailable for this run. See the preview steps for details."
             fi
-            echo
-            echo "[Open in Codespaces](https://codespaces.new/$GITHUB_REPOSITORY/pull/$PR_HEAD), run \`npm run preview\`, and open the pairing URL."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - run: npm run check:app

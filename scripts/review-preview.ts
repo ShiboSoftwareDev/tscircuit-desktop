@@ -13,12 +13,7 @@ const screenshots = values.screenshots && resolve(values.screenshots)
 const portOffset = 100
 const port = 5733 + portOffset
 const backendPort = 13773 + portOffset
-const { CODESPACE_NAME, GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN } = process.env
-const origin = new URL(
-  CODESPACE_NAME && GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN
-    ? `https://${CODESPACE_NAME}-${port}.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`
-    : `http://localhost:${port}`,
-)
+const origin = `http://localhost:${port}`
 const projectTitle = "Voltage divider"
 const threadTitle = "Circuit review"
 const replayModel = { instanceId: "devReplay", model: "showcase" }
@@ -32,9 +27,7 @@ const env: NodeJS.ProcessEnv = {
   USERPROFILE: previewDirectory,
   PATH: [join(checkoutDir, "node_modules", ".bin"), process.env.PATH].join(delimiter),
   TSCIRCUIT_DESKTOP_PORT_OFFSET: String(portOffset),
-  TSCIRCUIT_DESKTOP_DEV_ALLOWED_HOSTS: origin.hostname,
-  TSCIRCUIT_DESKTOP_DEV_ALLOWED_ORIGINS: origin.origin,
-  TSCIRCUIT_DESKTOP_BUNDLED_DEV: CODESPACE_NAME ? "1" : "0",
+  TSCIRCUIT_DESKTOP_DEV_ALLOWED_ORIGINS: origin,
   TSCIRCUIT_DESKTOP_TELEMETRY_ENABLED: "false",
 }
 delete env.TSCIRCUIT_DESKTOP_DEV_AUTH_TOKEN
@@ -74,7 +67,7 @@ try {
   const server = spawn(
     process.execPath,
     [
-      "scripts/dev-runner.ts", "dev", "--home-dir", appHome, "--dev-url", origin.origin,
+      "scripts/dev-runner.ts", "dev", "--home-dir", appHome, "--dev-url", origin,
       "--port", String(backendPort),
       "--no-seed", "--no-auto-bootstrap-project-from-cwd",
     ],
