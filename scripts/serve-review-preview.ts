@@ -15,7 +15,6 @@ const origins = new Map(getHostedOrigins().map((origin) => [new URL(origin).host
 const revision = commit.slice(0, 12)
 const image = `dockerfile:${revision}`
 const cookieName = "__Host-tscircuit-review"
-const oneDay = 24 * 60 * 60 * 1000
 const toolsDirectory = "/app/.cache/preview-tools/node_modules/.bin"
 const workspaces = new Map<string, Promise<string>>()
 const proxy = createProxyServer()
@@ -68,11 +67,10 @@ async function startWorkspace(
     name,
     image,
     ports: [sandboxPort],
-    persistent: true,
+    // Review sessions start from the deployment image and need no snapshot.
+    persistent: false,
     resume: true,
     timeout: 30 * 60 * 1000,
-    snapshotExpiration: oneDay,
-    keepLastSnapshots: { count: 1 },
   }).catch((error) => {
     if (!(error instanceof APIError) || error.response.status !== 409) throw error
     return Sandbox.get({ ...credentials, name, resume: true })
@@ -148,14 +146,26 @@ const gateway = createServer((request, response) => {
 
   void prepareRequest(request, origin, reviewer).then((options) => proxy.web(request, response, options))
     .catch((error: unknown) => {
-      const reason = error instanceof APIError
-        ? `Sandbox API HTTP ${error.response.status}`
-        : error instanceof Error && error.message === "The request has no Vercel OIDC token."
-          ? error.message
-          : "workspace unavailable"
+      const sandboxStatus = error instanceof APIError ? error.response.status : undefined
+      const sandboxCode = error instanceof APIError ? error.json?.error?.code : undefined
+      let reason = "workspace unavailable"
+      if (sandboxStatus) {
+        reason = `Sandbox API HTTP ${sandboxStatus}`
+        if (typeof sandboxCode === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(sandboxCode)) {
+          reason += ` (${sandboxCode})`
+        }
+      } else if (error instanceof Error && error.message === "The request has no Vercel OIDC token.") {
+        reason = error.message
+      }
       console.error(`Review preview: ${reason}`)
-      if (!response.headersSent) response.writeHead(503, { "Cache-Control": "no-store", "Retry-After": "5" })
-      response.end("The review workspace is unavailable. Reload to reconnect.")
+      if (!response.headersSent) {
+        response.setHeader("Cache-Control", "no-store")
+        if (sandboxStatus !== 402) response.setHeader("Retry-After", "5")
+        response.writeHead(503)
+      }
+      response.end(sandboxStatus === 402
+        ? "The preview host has reached its Vercel Sandbox allowance."
+        : "The review workspace is unavailable. Reload to reconnect.")
     })
 })
 
